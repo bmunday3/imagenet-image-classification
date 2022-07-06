@@ -1,4 +1,5 @@
 import torch
+import cv2
 import numpy as np
 import torch.nn.functional as F
 from skimage.segmentation import quickshift,slic,mark_boundaries
@@ -162,7 +163,11 @@ class AXAI():
         mask_axai = explanations_tmp[:,:,0]
         resized_mask = resize(mask_axai,orig_shape)
         resized_mask[resized_mask!=1] = 0
-        rle_mask = rle_encode_mask(resized_mask)
+        rle_mask = rle_encode_mask(resized_mask)      
+
+        #remove noise
+        kernel = np.ones((5,5),np.uint8)
+        closed_mask = cv2.morphologyEx(resized_mask, cv2.MORPH_CLOSE, kernel)        
 
         return rle_mask
         

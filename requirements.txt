@@ -3,3 +3,9 @@ grpcio==1.36.1
 protobuf==3.15.6
 pyyaml==5.4.1; (python_version >= "2.7" and python_full_version < "3.0.0") or (python_full_version >= "3.6.0")
 six==1.15.0; python_version >= "2.7" and python_full_version < "3.0.0" or python_full_version >= "3.3.0"
+torch
+torchvision
+Pillow
+pycryptodome==3.10.1
+scikit-image
+scikit-learn==0.24.1

@@ -5,8 +5,11 @@ import os
 import sys
 import ast
 import io
+import cv2
+import copy
 import numpy as np
 from PIL import Image
+from skimage.transform import resize
 
 import torch
 import torch.nn as nn
@@ -14,11 +17,13 @@ import torchvision.transforms as transforms
 import torchvision.models as models
 
 # import data drift and AXAI libraries
+from model_lib.src.modzy import Utilities
+from model_lib.src.modzy_axai import AXAI
 
 
 # define data directories
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
-WEIGHTS_DIR = os.path.join(ROOT_DIR, 'weights/resnet101_weights.pth')
+WEIGHTS_DIR = os.path.join(ROOT_DIR, 'unbalanced_model.pth')
 
 """
 The required output structure for a successful inference run for a models is the following JSON:
@@ -136,34 +141,24 @@ class GRPCResNetImageClassification:
 
         This corresponds to the Status remote procedure call.
         """
-        # define hardware device - set to "cuda" if there is GPU available and will run on CPU if no GPU is available
-        self.device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-        
-        # load pre-trained weights to model
-        self.model = models.resnet101()        
-        self.model.load_state_dict(torch.load(WEIGHTS_DIR))
-        
-        # set model to the hardware device
-        self.model.to(self.device)
-        
-        # set model to inference mode
-        self.model.eval()
+        # experimenting
+        self.utilities = Utilities()
+        self.unbalanced_model, self.device = self.utilities.load_weights(WEIGHTS_DIR, None, None)
+        self.unbalanced_model, self.arrays, self.hook_handles = self.utilities.install(self.unbalanced_model) 
                 
         # labels
         self.labels = ["plane", "empty seafloor", "ship"]
             
+        self.pxls = 150
         # define data transform
-         self.transform = transforms.Compose([ 
-            transforms.Resize(size=(pxls,pxls)),
+        self.transform = transforms.Compose([ 
+            transforms.Resize(size=(150,150)),
             transforms.ToTensor(),
             transforms.Normalize([0.485, 0.456, 0.406],[0.229, 0.224, 0.225])
-        ])
+        ])        
 
-        pxls = 150
-
-        
-
-        
+        # initialize AXAI exp
+        self.AXAI = AXAI(self.unbalanced_model)
     
     def preprocess_img_bytes(self,img_bytes):
         """
@@ -174,16 +169,16 @@ class GRPCResNetImageClassification:
         """
 
         try:
-            data = cv2.imdecode(np.frombuffer(img_bytes, np.uint8), -1)
-            orig_shape = data.shape
+            data = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+            orig_shape = data.size
         except Exception as e:
             return get_failure_json_structure(
                 f"invalid image: the image file is corrupt or the format is not supported. Exception message: {e}"
             ),None
 
-        # resize and center crop input TODO: edit this
-        data = cv2.cvtColor(data, cv2.COLOR_BGR2RGB)
-        data = cv2.resize(data, (224, 224)).reshape((1,224,224,3))
+        # resize and center crop input
+        data = self.transform(data).to(self.device)
+        data = data.reshape(1,3,self.pxls, self.pxls)
         
         return data, orig_shape
    
@@ -198,109 +193,27 @@ class GRPCResNetImageClassification:
         if len(images.shape)==3:
             images = np.expand_dims(images, axis=0)
 
-        # transform
-        batch_t = torch.stack(tuple(self.transform(i) for i in images), dim=0).to(self.device)
-
         # inference and softmax
-        output = self.model(batch_t)
-        probs = torch.nn.functional.softmax(output, dim=1)
-
-        # return NumPy array
-        softmax_output = probs.detach().cpu().numpy()
-        
-        return softmax_output
-    
-    def postprocess(self, softmax_preds):
-        """
-        Args: 
-            Softmax prediction probabilities  
-        Returns: 
-            Top five prediction probabilities and their corresponding class labels
-        """  
-
-        top5_labels = []
-        top5_probs = []    
-        for preds in softmax_preds: 
-            indices = np.argsort(preds)[::-1]
-            labels = [self.labels[idx] for idx in indices[:5]]
-            probs = [float(preds[idx]) for idx in indices[:5]]
-
-            top5_labels.append(labels)
-            top5_probs.append(probs)
-        
-        return top5_probs, top5_labels    
-    
-    def format_results(self,all_img_scores, all_img_classes):
-        """
-        Args: 
-            Prediction scores and class labels
-        Returns: 
-            A properly formatted output compliant with the Modzy 2.0 output container specification
-        """  
-
         all_formatted_results = []
-
-        for i in range(len(all_img_classes)):
-            classes = all_img_classes[i]
-            scores = all_img_scores[i]
-
-            # format results
-            preds = [{"class": "{}".format(label), "score": round(float(score),3)} for label, score in zip(classes, scores)]
-            preds.sort(key = lambda x: x["score"],reverse=True)
-            results = {"classPredictions": preds}
-            all_formatted_results.append(results)
+        output = self.unbalanced_model(images)
+        probs = torch.nn.functional.softmax(output, dim=1)
+        probs = probs.detach().cpu().numpy()
+        for prob in probs:
+            prob = np.expand_dims(prob, 0)
+            indices = np.argsort(prob[0])[::-1]
+            inference_result = {
+                "classPredictions": [
+                    {"class": self.labels[idx], "score": round(float(prob[0][idx]), 3)}
+                for idx in indices]
+            }
+            all_formatted_results.append(inference_result)            
         
-        return all_formatted_results
+        return all_formatted_results      
     
-    
-    def get_explainability(self, image, pred_fn, orig_shape):
-        """
-        Generate explanation for image, output Run-Length Encoding (RLE) mask.
-
-        Uses LIME's image explanation capabilities to generate explanation for a single image.
-
-        Args:
-            image: 
-                NumPy array image with dimensions (HEIGHT,WIDTH,3)
-            pred_fn: 
-                function which takes a NumPy array with dimensions (BATCH_SIZE,HEIGHT,WIDTH,3) 
-                containing a batch of images, and outputs a NumPy array with dimensions 
-                (BATCH_SIZE,NUM_CLASSES) containing prediction probabilities for each image in the batch
-
-        Returns:
-            List of RLE counts (RLE mask)
-        """
-
-        # reshape image for explainability
-        if len(image.shape) > 3:
-            image = np.reshape(image, image.shape[1:])
-
-        # initialize explainer
-        explainer = lime_image.LimeImageExplainer(random_state=0)
-
-        # to understand the arguments passed here, visit:
-        # https://lime-ml.readthedocs.io/en/latest/lime.html#module-lime.lime_image
-        explanation = explainer.explain_instance(
-            image,
-            pred_fn,
-            top_labels=1,
-            hide_color=0,
-            batch_size=32,
-            num_samples=1000,
-            random_seed=0,
-            num_features = 1,
-        )
-
-        # retrieve mask from explanation
-        _, mask = explanation.get_image_and_mask(explanation.top_labels[0], positive_only=True, hide_rest=True)
-
-        # convert mask to RLE format
-        resized_mask = cv2.resize(mask.astype('float32'), (orig_shape[1], orig_shape[0]))
-        rle_mask = rle_encode_mask(resized_mask)
-
-        # return RLE format mask
-        return rle_mask        
-    
+    def reinstall(self):
+        for handle in self.hook_handles:
+            handle.remove()
+        self.unbalanced_model,self.arrays,self.hook_handles = self.utilities.install(self.unbalanced_model)    
     
     def handle_single_input(self, model_input: Dict[str, bytes], detect_drift: bool, explain: bool) -> Dict[str, bytes]:
         """
@@ -315,7 +228,6 @@ class GRPCResNetImageClassification:
 
         return result
   
-    
     def handle_input_batch(self, model_inputs: List[Dict[str, bytes]], detect_drift, explain) -> List[Dict[str, bytes]]:
         """
         This is an optional method that will be attempted to be called when more than one inputs to the model
@@ -353,33 +265,40 @@ class GRPCResNetImageClassification:
         # if any valid images
         if imgs:
             # concatenate into single array
-            X = np.concatenate(imgs)
+            X = torch.cat(imgs)
 
             # run inference
             preds = self.batch_predict(X)
 
-            # perform postprocessing on raw predictions
-            probs, labels = self.postprocess(preds)
-
             # format results
-            formatted_results_iterator = iter(self.format_results(probs, labels))
+            formatted_results_iterator = iter(preds)
 
-            # compute explainability if job requests explainable output
+            # data drift hooks TODO: fix this
+            arrays = self.utilities.process(self.arrays, ".") 
+            drift_results = []
+            for i in range(len(imgs)):
+                drift_result = {"features_1": arrays[0][i], "features_2": arrays[1][i], "features_3": arrays[2][i], "features_4": arrays[3][i]}
+                drift_results.append(drift_result)
+            self.reinstall()
+            drift_results_iterator = iter(drift_results)                        
+
+           # run axai
             if explain:
                 explanation_results = []
                 for img, shape in zip(imgs, shapes):
-                    rle_mask = self.get_explainability(img, self.batch_predict, shape)
-                    explanation_results.append({"dimensions": {"height":shape[0], "width":shape[1]}, "maskRLE":[rle_mask]})
+                    exp_mask = self.AXAI.explain(img,(shape[1], shape[0]))
+                    explanation = {"maskRLE": [exp_mask], "dimensions": {"height": shape[0], "width": shape[1]}}
+                    explanation_results.append(explanation)
                 explanation_results_iterator = iter(explanation_results)
         
         # compile inference predictions, explanations, and drift output into a single output
         outputs = []    
-        drift_result = None
         for j in range(len(model_inputs)):
             if j in indexed_errors:
                 outputs.append(indexed_errors[j])
             else:
                 inference_result = next(formatted_results_iterator)
+                drift_result = next(drift_results_iterator)
                 if explain:
                     explanation_result = next(explanation_results_iterator)
                 else:

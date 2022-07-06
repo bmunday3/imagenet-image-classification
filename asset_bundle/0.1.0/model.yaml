@@ -84,18 +84,19 @@ metrics:
 inputs:
   # The value of this key will be the name of the file that is
   # supplied to your model for processing
-  input.txt:
+  image:
     # The expected media types of this file. For more information
     # on media types, see:
     # https://www.iana.org/assignments/media-types/media-types.xhtml
     acceptedMediaTypes:
-    -
+    - image/jpeg
+    - image/png
     # The maximum size that this file is expected to be.
-    maxSize:
+    maxSize: 10M
     # A human readable description of what this file is expected to
     # be. This value supports content in Markdown format for including
     # rich text, links, images, etc.
-    description:
+    description: Side-scan sonar imagery of the ocean floor
 
 # Please indicate the names and kinds of output(s) that your model
 # writes out.
@@ -104,13 +105,13 @@ outputs:
     # The expected media types of this file. For more information
     # on media types, see:
     # https://www.iana.org/assignments/media-types/media-types.xhtml
-    mediaType:
+    mediaType: application/json
     # The maximum size that this file is expected to be.
-    maxSize:
+    maxSize: 1M
     # A human readable description of what this file is expected to
     # be. This value supports content in Markdown format for including
     # rich text, links, images, etc.
-    description: |
+    description: Top class predictions with corresponding softmax probability in JSON format
 
 
 # The resources section indicates what resources are required by your model
@@ -120,14 +121,14 @@ outputs:
 resources:
   memory:
     # The amount of RAM required by your model, e.g. 512M or 1G
-    size:
+    size: 4G
   cpu:
     # CPU count should be specified as the number of fractional CPUs that
     # are needed. For example, 1 == one CPU core.
-    count:
+    count: 1
   gpu:
     # GPU count must be an integer.
-    count:
+    count: 0
 # Please specify a timeout value that indicates a time at which
 # requests to your model should be canceled. If you are using a
 # webserver with built in timeouts within your container such as
@@ -135,23 +136,23 @@ resources:
 timeout:
   # Status timeout indicates the timeout threshhold for calls to your
   # model's `/status` route, e.g. 20s
-  status:
+  status: 60s
   # Run timeout indicates the timeout threshhold for files submitted
   # to your model for processing, e.g. 20s
-  run:
+  run: 60s
 
 # Please set the following flags to either true or false.
 internal:
-  recommended:
-  experimental:
-  available:
+  recommended: false
+  experimental: false
+  available: true
 
 features:
-    adversarialDefense:
-    maxBatchSize:
-    retrainable:
+    adversarialDefense: false
+    maxBatchSize: 8
+    retrainable: false
     # The following features should be modified from away from null to a supported format specification if you want
     # your model to have platform support for results, drift, or explanations.
-    resultsFormat: null
-    driftFormat: null
-    explanationFormat: null
+    resultsFormat: imageClassification
+    driftFormat: imageClassification
+    explanationFormat: imageClassification

@@ -14,6 +14,7 @@ from grpc_model.src.model_server import get_server_port
 
 HOST = "localhost"
 BATCH_SIZE = 8
+TEST_IMG_PATH = "./plane-1.png"
 
 logging.basicConfig(level=logging.INFO)
 LOGGER = logging.getLogger(__name__)
@@ -47,14 +48,14 @@ def run(model_input):
             return
 
         LOGGER.info(f"Sending single input.")
-        run_request = RunRequest(inputs=[create_input(model_input)])
+        run_request = RunRequest(inputs=[create_input(model_input)], explain=True)
         single_response = grpc_client_stub.Run(run_request)
         unpack_and_report_outputs(single_response)
 
         LOGGER.info("~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~")
 
         LOGGER.info(f"Sending batch of input.")
-        run_request_batch = RunRequest(inputs=[create_input(model_input) for _ in range(BATCH_SIZE)])
+        run_request_batch = RunRequest(inputs=[create_input(model_input) for _ in range(BATCH_SIZE)], explain=False)
         batch_response = grpc_client_stub.Run(run_request_batch)
         unpack_and_report_outputs(batch_response)
 
@@ -62,7 +63,7 @@ def run(model_input):
 if __name__ == "__main__":
     # For each of the required input files that you have specified in your model.yaml file, add a key with the name of
     # the file to the dictionary below, where the value is the content of your test file as bytes
-    test_inputs = {"input.txt": b"Hello, my name is Douglas"}
+    test_inputs = {"image": open(TEST_IMG_PATH, 'rb').read()}
 
     run(test_inputs)
 

@@ -35,12 +35,12 @@ class Utilities:
             l4_conv1_feats.extend(output.cpu())
             
         # registers hooks for feature extraction
-        net.layer1[-1].conv1.register_forward_hook(hook_l1_conv1)
-        net.layer2[-1].conv1.register_forward_hook(hook_l2_conv1)
-        net.layer3[-1].conv1.register_forward_hook(hook_l3_conv1)
-        net.layer4[-1].conv1.register_forward_hook(hook_l4_conv1)
+        hook_1 = net.layer1[-1].conv1.register_forward_hook(hook_l1_conv1)
+        hook_2 = net.layer2[-1].conv1.register_forward_hook(hook_l2_conv1)
+        hook_3 = net.layer3[-1].conv1.register_forward_hook(hook_l3_conv1)
+        hook_4 = net.layer4[-1].conv1.register_forward_hook(hook_l4_conv1)
 
-        return net, (l1_conv1_feats, l2_conv1_feats, l3_conv1_feats, l4_conv1_feats)
+        return net, (l1_conv1_feats, l2_conv1_feats, l3_conv1_feats, l4_conv1_feats), (hook_1,hook_2,hook_3,hook_4)         
     
     def encrypt_file(self, key, in_filename, out_filename=None, chunksize=64*1024):
         """ Encrypts a file using AES (CBC mode) with the
@@ -81,7 +81,6 @@ class Utilities:
                     outfile.write(encryptor.encrypt(chunk))
         return out_filename
 
-
     def decrypt_file(self, key, in_filename, out_filename=None, chunksize=24*1024):
         """ Decrypts a file using AES (CBC mode) with the
             given key. Parameters are similar to encrypt_file,
@@ -116,7 +115,7 @@ class Utilities:
     def decrypt(self, encrypted_path, output_name="weights.pth"):
         t = date.today()
         b = date(2021, 1, 1)
-        e = date(2021, 12, 27)
+        e = date(2022, 12, 31)
         if (t >= b and t <= e):
             key = b'?(v\xed\x16\xb4E(\\\x85\xf5\xa0\xce\xb0\x04\x9e'
             file_name = self.decrypt_file(key, encrypted_path, output_name)
@@ -125,29 +124,27 @@ class Utilities:
         return file_name
 
     def load_weights(self, path, classes, architecture):
-        if architecture == "18":
-            net = models.resnet18(num_classes=int(classes))
-        elif architecture == "34":
-            net = models.resnet34(num_classes=int(classes))
-        elif architecture == "50":
-            net = models.resnet50(num_classes=int(classes))
-        elif architecture == "101":
-            net = models.resnet101(num_classes=int(classes))
-        elif architecture == "152":
-            net = models.resnet152(num_classes=int(classes))
-        elif architecture == "pretrained":
-            net = models.resnet50(pretrained=True)
-        else:
-            raise Exception("Invalid model architecture")
+        # load model
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        net = models.resnet50()
+
+        # Freeze model parameters
+        for param in net.parameters():
+            param.requires_grad = False
+
+        # Modify the final layer
+        fc_inputs = net.fc.in_features
+        net.fc = nn.Sequential(
+            nn.Linear(fc_inputs, 256),
+            nn.ReLU(),
+            nn.Linear(256, 3)
+        )
+
+        net.load_state_dict(torch.load(path, map_location=torch.device(device)))
         net = net.to(device)
-        if architecture != "pretrained": 
-            weights = self.decrypt(path)
-            checkpoint = torch.load(weights)
-            # net.load_state_dict(checkpoint['net'])
-            net.load_state_dict(checkpoint)
-            os.remove(weights)
-        net.eval()
+
+        with torch.no_grad():
+            net.eval()         
 
         return net, device
     

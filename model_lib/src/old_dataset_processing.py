@@ -16,7 +16,8 @@ from joblib import dump, load
 
 import numpy as np
 import os
-from models import *
+# from models import *
+# from torchvision.models import *
 from tqdm import tqdm
 
 from sklearn.covariance import EmpiricalCovariance
@@ -103,26 +104,49 @@ class Old_Processing:
                 l4_conv1_feats.extend(output.cpu())
 
             # load model
-            if self.ARCHITECTURE == "18":
-                net = models.resnet18(num_classes=int(self.CLASSES))
-            elif self.ARCHITECTURE == "34":
-                net = models.resnet34(num_classes=int(self.CLASSES))
-            elif self.ARCHITECTURE == "50":
-                net = models.resnet50(num_classes=int(self.CLASSES))
-            elif self.ARCHITECTURE == "101":
-                net = models.resnet101(num_classes=int(self.CLASSES))
-            elif self.ARCHITECTURE == "152":
-                net = models.resnet152(num_classes=int(self.CLASSES))
-            elif self.ARCHITECTURE == "pretrained":
-                net = models.resnet50(pretrained=True)
-            else:
-                raise Exception("Invalid model architecture")
             device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+            net = models.resnet50()
+
+            # Freeze model parameters
+            for param in net.parameters():
+                param.requires_grad = False
+
+            # Modify the final layer
+            fc_inputs = net.fc.in_features
+            net.fc = nn.Sequential(
+                nn.Linear(fc_inputs, 256),
+                nn.ReLU(),
+                nn.Linear(256, 3)
+            )
+
+            net.load_state_dict(torch.load(self.WEIGHTS, map_location=torch.device(device)))
             net = net.to(device)
-            if self.ARCHITECTURE != "pretrained": 
-                checkpoint = torch.load(self.WEIGHTS)
-                net.load_state_dict(checkpoint['net'])
-            net.eval()
+
+            with torch.no_grad():
+                net.eval()    
+
+            # if self.ARCHITECTURE == "18":
+            #     net = models.resnet18(num_classes=int(self.CLASSES))
+            # elif self.ARCHITECTURE == "34":
+            #     net = models.resnet34(num_classes=int(self.CLASSES))
+            # elif self.ARCHITECTURE == "50":
+            #     net = models.resnet50(num_classes=int(self.CLASSES))
+            # elif self.ARCHITECTURE == "101":
+            #     net = models.resnet101(num_classes=int(self.CLASSES))
+            # elif self.ARCHITECTURE == "152":
+            #     net = models.resnet152(num_classes=int(self.CLASSES))
+            # elif self.ARCHITECTURE == "pretrained":
+            #     net = models.resnet50(pretrained=True)
+            # else:
+            #     raise Exception("Invalid model architecture")
+            # if self.ARCHITECTURE != "pretrained": 
+            #     checkpoint = torch.load(self.WEIGHTS)
+            #     # print(checkpoint.keys())
+            #     # import sys
+            #     # sys.exit()
+            #     net.load_state_dict(checkpoint['net'])
+            # net.eval()
 
             old_transforms = self.TSFMS
             old_data = DriftDataset(self.OLD_DATA + '/' +sd, transform=old_transforms)
