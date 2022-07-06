@@ -31,7 +31,7 @@ from grpc_model.src.utils import (
     model_version_is_synchronized,
     parse_complete_model_yaml,
 )
-from model_lib.src.model import ExampleModel
+from model_lib.src.model import GRPCResNetImageClassification
 
 MAX_WORKERS = 1
 
@@ -105,7 +105,7 @@ class ModzyModel(ModzyModelServicer):
         if self.model is None:
             try:
                 # If this is the first time calling the `Status` route, then attempt to load the model
-                self.model = ExampleModel()
+                self.model = GRPCResNetImageClassification()
                 message = "Model Initialized Successfully."
                 LOGGER.info(message)
                 status_response = StatusResponse(
